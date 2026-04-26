@@ -56,6 +56,9 @@ class LoginScreen extends StatelessWidget {
                     const SizedBox(height: 32),
 
                     _buildSignInButton(context),
+                    const SizedBox(height: 20),
+
+                    _buildGuestButton(context),
                     const SizedBox(height: 30),
 
                     _buildDivider(),
@@ -111,8 +114,7 @@ class LoginScreen extends StatelessWidget {
           borderRadius: BorderRadius.circular(30),
         ),
         child: ElevatedButton(
-          onPressed: () => Navigator.pushReplacement(
-              context, MaterialPageRoute(builder: (context) => const HomeScreen())),
+          onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.transparent,
             shadowColor: Colors.transparent,
@@ -122,6 +124,21 @@ class LoginScreen extends StatelessWidget {
             "Sign In",
             style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuestButton(BuildContext context) {
+    return TextButton(
+      onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
+      child: const Text(
+        "Continue as Guest",
+        style: TextStyle(
+          color: AppColors.accentLavender,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          decoration: TextDecoration.underline,
         ),
       ),
     );
