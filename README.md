@@ -48,3 +48,25 @@ dependencies:
 ---
 
 ## 📂 Project Structure
+lib/
+├── main.dart
+├── screens/
+├── widgets/
+├── services/
+│    ├── auth_service.dart
+│    └── firestore_service.dart
+
+
+---
+
+## 🚀 How to Run
+
+```bash
+flutter pub get
+flutter run
+```
+
+> Make sure you have added your `google-services.json` before running.
+
+---
+
