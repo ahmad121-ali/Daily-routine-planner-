@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/linear_gradient.dart';
+import '../../models/ritual.dart';
+import '../../services/ritual_service.dart';
+import '../../services/task_service.dart';
 
 class AddTaskScreen extends StatefulWidget {
   const AddTaskScreen({super.key});
@@ -9,10 +12,57 @@ class AddTaskScreen extends StatefulWidget {
 }
 
 class _AddTaskScreenState extends State<AddTaskScreen> {
+  final RitualService _ritualService = RitualService();
+  final TaskService _taskService = TaskService(); 
+  
   bool isReminderEnabled = true;
-  String selectedFocus = "Deep Work";
+  String selectedFocus = "Flow";
+  String selectedCategory = "Mind";
+  String? selectedSubCategory; 
+  TimeOfDay selectedTime = TimeOfDay.now();
   final TextEditingController _titleController = TextEditingController();
   bool _isLoading = false;
+
+  final List<Map<String, dynamic>> categories = [
+    {"name": "Mind", "icon": Icons.psychology, "color": AppColors.accentLavender},
+    {"name": "Body", "icon": Icons.fitness_center, "color": Colors.orangeAccent},
+    {"name": "Work", "icon": Icons.work, "color": AppColors.accentPurple},
+    {"name": "Soul", "icon": Icons.favorite, "color": Colors.tealAccent},
+  ];
+
+  final Map<String, List<String>> recommendations = {
+    "Mind": ["Vedic Meditation", "Journaling", "Reading", "Deep Breathing"],
+    "Body": ["Chest Workout", "Back Workout", "Leg Workout", "Shoulder Workout", "Core Workout"],
+    "Work": ["Deep Focus", "Email Batching", "Planning", "Research"],
+    "Soul": ["Gratitude", "Prayer", "Nature Walk", "Listening to Music"],
+  };
+
+  final Map<String, List<Map<String, dynamic>>> gymExerciseDetails = {
+    "Chest Workout": [
+      {"name": "Bench Press", "image": "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?q=80&w=500", "techniques": ["Lie flat on the bench", "Grip bar wide", "Lower to chest", "Push up"]},
+      {"name": "Incline Press", "image": "https://images.unsplash.com/photo-1581009146145-b5ef03a7403f?q=80&w=500", "techniques": ["Adjust bench to 30-45 degrees", "Focus on upper chest", "Press weights up", "Control descent"]},
+      {"name": "Chest Flys", "image": "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=500", "techniques": ["Wide arc motion", "Squeeze chest", "Control weight", "Keep elbows slightly bent"]},
+    ],
+    "Back Workout": [
+      {"name": "Pull Ups", "image": "https://images.unsplash.com/photo-1526506118085-60ce8714f8c5?q=80&w=500", "techniques": ["Wide grip", "Pull chin above bar", "Squeeze shoulder blades", "Full extension"]},
+      {"name": "Deadlift", "image": "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?q=80&w=500", "techniques": ["Feet hip-width", "Flat back", "Drive through heels", "Chest up"]},
+    ],
+    "Leg Workout": [
+      {"name": "Squats", "image": "https://images.unsplash.com/photo-1574680096145-d05b474e2155?q=80&w=500", "techniques": ["Shoulder width stance", "Hips below knees", "Weight on heels", "Drive up"]},
+    ],
+    "Shoulder Workout": [
+      {"name": "Overhead Press", "image": "https://images.unsplash.com/photo-1541534741688-6078c64b52d2?q=80&w=500", "techniques": ["Core tight", "Press to ceiling", "Full lockout", "Controlled descent"]},
+    ],
+    "Core Workout": [
+      {"name": "Plank", "image": "https://images.unsplash.com/photo-1566241142559-40e1bfc26ebc?q=80&w=500", "techniques": ["Elbows under shoulders", "Straight body line", "Squeeze glutes", "Hold tight"]},
+    ],
+  };
+
+  final List<Map<String, String>> focusLevels = [
+    {"name": "Soft", "desc": "Light & Easy", "duration": "0"},
+    {"name": "Flow", "desc": "Creative state", "duration": "20"},
+    {"name": "Deep", "desc": "Max intensity", "duration": "90"},
+  ];
 
   @override
   void dispose() {
@@ -27,27 +77,93 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     }
 
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 1200));
+    
+    try {
+      if (!mounted) return;
+      final timeStr = selectedTime.format(context);
+      final period = _calculatePeriod(selectedTime);
+      final focusData = focusLevels.firstWhere((f) => f['name'] == selectedFocus);
+      final bool isTimed = selectedFocus != "Soft";
+      final int? duration = int.parse(focusData['duration']!) > 0 ? int.parse(focusData['duration']!) : null;
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-      _showFeedback("Intention set successfully.");
-      _titleController.clear();
-      FocusScope.of(context).unfocus();
+      String? imageUrl;
+      List<String>? techniques;
+
+      if (selectedCategory == "Body" && selectedSubCategory != null) {
+        final List<Map<String, dynamic>>? categoryDetails = gymExerciseDetails[selectedSubCategory!];
+        if (categoryDetails != null) {
+          final detail = categoryDetails.firstWhere(
+            (e) => e['name'] == _titleController.text,
+            orElse: () => <String, dynamic>{},
+          );
+          if (detail.isNotEmpty) {
+            imageUrl = detail['image'];
+            techniques = List<String>.from(detail['techniques'] ?? []);
+          }
+        }
+      }
+
+      // 1. Save to Firebase (Cloud) with ALL detailed information
+      await _taskService.addTask(
+        title: _titleController.text,
+        category: selectedCategory,
+        time: timeStr,
+        focus: selectedFocus,
+        period: period.name,
+        isTimed: isTimed,
+        duration: duration,
+        imageUrl: imageUrl,
+        techniques: techniques,
+      );
+
+      // 2. Prepare Local Logic for immediate UI update
+      final categoryData = categories.firstWhere((c) => c['name'] == selectedCategory);
+      
+      final newRitual = Ritual(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: _titleController.text,
+        subtitle: "$selectedFocus Intensity",
+        time: timeStr,
+        category: RitualCategory.values.firstWhere((e) => e.name == selectedCategory.toLowerCase()),
+        focus: RitualFocus.values.firstWhere((e) => e.name == selectedFocus.toLowerCase()),
+        period: period,
+        icon: categoryData['icon'],
+        color: categoryData['color'],
+        isTimed: isTimed,
+        durationMinutes: duration,
+        imageUrl: imageUrl,
+        techniques: techniques,
+      );
+
+      _ritualService.addRitual(newRitual);
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showFeedback("Intention set and synced to cloud!");
+        // After successfully creating a task, go back to home screen
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showFeedback("Error syncing: $e", isError: true);
+      }
     }
   }
 
+  RitualPeriod _calculatePeriod(TimeOfDay time) {
+    if (time.hour >= 5 && time.hour < 12) return RitualPeriod.dawn;
+    if (time.hour >= 12 && time.hour < 18) return RitualPeriod.zenith;
+    return RitualPeriod.dusk;
+  }
+
   void _showFeedback(String message, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-        backgroundColor: isError ? Colors.redAccent.withValues(alpha: 0.9) : AppColors.accentPurple.withValues(alpha: 0.9),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? Colors.redAccent : AppColors.accentPurple,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    ));
   }
 
   @override
@@ -59,7 +175,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
           SafeArea(
             child: Column(
               children: [
-                _buildAppBar(context),
+                _buildAppBar(),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -67,29 +183,30 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 20),
-                        Text("New Intention", style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 36, fontWeight: FontWeight.bold)),
-                        const Text("Define your rhythm for the day ahead.", style: TextStyle(color: Colors.white54, fontSize: 18)),
+                        const Text("New Intention", style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white)),
+                        const Text("Define your rhythm for the day.", style: TextStyle(color: Colors.white54, fontSize: 18)),
                         const SizedBox(height: 40),
 
                         _sectionLabel("INTENTION TITLE"),
                         _buildTitleInput(),
+                        const SizedBox(height: 12),
+                        _buildRecommendations(),
+
+                        const SizedBox(height: 35),
+                        _sectionLabel("CATEGORY"),
+                        _buildCategorySelector(),
 
                         const SizedBox(height: 35),
                         _sectionLabel("TEMPORAL RHYTHM"),
-                        _buildRhythmCard("Dawn", "06:00 - 10:00", Icons.wb_sunny_rounded, Colors.orangeAccent),
-                        _buildRhythmCard("Zenith", "10:00 - 18:00", Icons.light_mode_rounded, AppColors.accentLavender, isRecommended: true),
-                        _buildRhythmCard("Dusk", "18:00 - 00:00", Icons.nightlight_round, Colors.indigoAccent),
+                        _buildTimePickerTrigger(),
 
                         const SizedBox(height: 35),
                         _sectionLabel("FOCUS LEVEL"),
                         _buildFocusSelector(),
 
-                        const SizedBox(height: 35),
-                        _buildReminderToggle(),
-
                         const SizedBox(height: 40),
                         _buildCreateButton(),
-                        const SizedBox(height: 140),
+                        const SizedBox(height: 120),
                       ],
                     ),
                   ),
@@ -102,56 +219,16 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     );
   }
 
-  Widget _buildAppBar(BuildContext context) {
+  Widget _buildAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: const [
-              Hero(
-                tag: 'profile-pic',
-                child: CircleAvatar(radius: 18, backgroundImage: NetworkImage("https://i.pravatar.cc/150?img=3")),
-              ),
-              SizedBox(width: 12),
-              Text("Sanctuary", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-            ],
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white70), 
+            onPressed: () => Navigator.pushReplacementNamed(context, '/home')
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.settings, color: Colors.white70),
-            offset: const Offset(0, 50),
-            color: const Color(0xFF1A1F36),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            onSelected: (value) {
-              if (value == 'logout') {
-                Navigator.pushReplacementNamed(context, '/');
-              } else if (value == 'edit') {
-                Navigator.pushNamed(context, '/edit-profile');
-              } else if (value == 'settings') {
-                Navigator.pushNamed(context, '/settings');
-              }
-            },
-            itemBuilder: (context) => [
-              _buildPopupItem("edit", "Edit", Icons.edit),
-              _buildPopupItem("settings", "Settings", Icons.settings_suggest),
-              const PopupMenuDivider(height: 1),
-              _buildPopupItem("logout", "Logout", Icons.logout, isDestructive: true),
-            ],
-          )
-        ],
-      ),
-    );
-  }
-
-  PopupMenuItem<String> _buildPopupItem(String value, String text, IconData icon, {bool isDestructive = false}) {
-    return PopupMenuItem(
-      value: value,
-      child: Row(
-        children: [
-          Icon(icon, color: isDestructive ? Colors.redAccent : Colors.white70, size: 20),
-          const SizedBox(width: 10),
-          Text(text, style: TextStyle(color: isDestructive ? Colors.redAccent : Colors.white)),
+          const Text("Sanctuary", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -159,7 +236,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
   Widget _sectionLabel(String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Text(text, style: const TextStyle(color: AppColors.accentLavender, fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.bold)),
     );
   }
@@ -167,82 +244,113 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   Widget _buildTitleInput() {
     return TextField(
       controller: _titleController,
-      enabled: !_isLoading,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
-        hintText: "What are we focusing on?",
-        hintStyle: const TextStyle(color: Colors.white24),
-        filled: true,
-        fillColor: AppColors.cardFill,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: AppColors.cardBorder)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: AppColors.cardBorder)),
+        filled: true, fillColor: AppColors.cardFill,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+        hintText: "What is your intention?", hintStyle: const TextStyle(color: Colors.white24),
       ),
     );
   }
 
-  Widget _buildRhythmCard(String title, String time, IconData icon, Color iconColor, {bool isRecommended = false}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.cardFill,
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: isRecommended ? AppColors.accentLavender.withValues(alpha: 0.2) : AppColors.cardBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(shape: BoxShape.circle, color: iconColor.withValues(alpha: 0.15)),
-            child: Icon(icon, color: iconColor, size: 24),
+  Widget _buildRecommendations() {
+    List<String> suggestions;
+    final categoryColor = categories.firstWhere((c) => c['name'] == selectedCategory)['color'] as Color;
+
+    if (selectedCategory == "Body" && selectedSubCategory != null) {
+      suggestions = gymExerciseDetails[selectedSubCategory!]?.map((e) => e['name'] as String).toList() ?? [];
+    } else {
+      suggestions = recommendations[selectedCategory] ?? [];
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (selectedSubCategory != null && selectedCategory == "Body")
+          TextButton.icon(
+            onPressed: () => setState(() => selectedSubCategory = null),
+            icon: const Icon(Icons.arrow_back, size: 14, color: Colors.orangeAccent),
+            label: const Text("Back to Body Groups", style: TextStyle(color: Colors.orangeAccent, fontSize: 12)),
           ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                const SizedBox(height: 4),
-                Text(time, style: const TextStyle(color: Colors.white38, fontSize: 14)),
-              ],
-            ),
-          ),
-          if (isRecommended)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.accentLavender.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.accentLavender.withValues(alpha: 0.2)),
+        Wrap(
+          spacing: 8,
+          children: suggestions.map((text) => ActionChip(
+            label: Text(text),
+            backgroundColor: categoryColor.withValues(alpha: 0.1),
+            onPressed: () {
+              if (selectedCategory == "Body" && selectedSubCategory == null) {
+                setState(() => selectedSubCategory = text);
+              } else {
+                setState(() => _titleController.text = text);
+              }
+            },
+          )).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategorySelector() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: categories.map((cat) {
+        final isSelected = selectedCategory == cat['name'];
+        return GestureDetector(
+          onTap: () => setState(() { selectedCategory = cat['name']; selectedSubCategory = null; }),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isSelected ? (cat['color'] as Color).withValues(alpha: 0.2) : AppColors.cardFill,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: isSelected ? (cat['color'] as Color) : AppColors.cardBorder),
+                ),
+                child: Icon(cat['icon'], color: isSelected ? (cat['color'] as Color) : Colors.white38),
               ),
-              child: const Text("RECOMMENDED", style: TextStyle(color: AppColors.accentLavender, fontSize: 10, fontWeight: FontWeight.bold)),
-            )
-        ],
+              const SizedBox(height: 8),
+              Text(cat['name'], style: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontSize: 12)),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildTimePickerTrigger() {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showTimePicker(context: context, initialTime: selectedTime);
+        if (picked != null) setState(() => selectedTime = picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(color: AppColors.cardFill, borderRadius: BorderRadius.circular(20)),
+        child: Row(children: [
+          const Icon(Icons.access_time, color: AppColors.accentLavender),
+          const SizedBox(width: 15),
+          Text(selectedTime.format(context), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        ]),
       ),
     );
   }
 
   Widget _buildFocusSelector() {
-    final levels = ["Soft", "Deep Work", "Flow"];
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: levels.map((level) {
-        final isSelected = selectedFocus == level;
+      children: focusLevels.map((level) {
+        final isSelected = selectedFocus == level['name'];
         return Expanded(
           child: GestureDetector(
-            onTap: _isLoading ? null : () => setState(() => selectedFocus = level),
+            onTap: () => setState(() => selectedFocus = level['name']!),
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 4),
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
                 gradient: isSelected ? AppColors.primaryButtonGradient : null,
-                color: isSelected ? null : Colors.white.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: isSelected ? [BoxShadow(color: AppColors.accentPurple.withValues(alpha: 0.3), blurRadius: 15, offset: const Offset(0, 5))] : [],
+                color: isSelected ? null : AppColors.cardFill,
+                borderRadius: BorderRadius.circular(15),
               ),
-              child: Center(
-                child: Text(level, style: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontWeight: FontWeight.bold)),
-              ),
+              child: Center(child: Text(level['name']!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
             ),
           ),
         );
@@ -250,84 +358,18 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     );
   }
 
-  Widget _buildReminderToggle() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: AppColors.cardFill, borderRadius: BorderRadius.circular(30), border: Border.all(color: AppColors.cardBorder)),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Reminder", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                SizedBox(height: 6),
-                Text("Notifications will be delivered in a gentle chime.", style: TextStyle(color: Colors.white38, fontSize: 13, height: 1.4)),
-              ],
-            ),
-          ),
-          Switch(
-            value: isReminderEnabled,
-            onChanged: _isLoading ? null : (v) => setState(() => isReminderEnabled = v),
-            activeThumbColor: AppColors.accentLavender,
-            activeTrackColor: AppColors.accentLavender.withValues(alpha: 0.3),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildCreateButton() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _isLoading ? null : _handleCreateTask,
-        borderRadius: BorderRadius.circular(30),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: _isLoading ? null : AppColors.primaryButtonGradient,
-            color: _isLoading ? AppColors.cardFill : null,
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: _isLoading
-                ? []
-                : [
-                    BoxShadow(
-                      color: AppColors.accentLavender.withValues(alpha: 0.25),
-                      blurRadius: 15,
-                      offset: const Offset(0, 8),
-                    )
-                  ],
-          ),
-          child: Container(
-            height: 58,
-            width: double.infinity,
-            alignment: Alignment.center,
-            child: _isLoading
-                ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: Colors.white),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        "Set Intention",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Icon(Icons.auto_awesome_outlined,
-                          color: Colors.white.withValues(alpha: 0.9), size: 20),
-                    ],
-                  ),
-          ),
+    return SizedBox(
+      width: double.infinity, height: 58,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.accentPurple, 
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
         ),
+        onPressed: _isLoading ? null : _handleCreateTask,
+        child: _isLoading 
+            ? const CircularProgressIndicator(color: Colors.white) 
+            : const Text("Set Intention", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
       ),
     );
   }

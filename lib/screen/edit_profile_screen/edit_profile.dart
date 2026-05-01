@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/linear_gradient.dart';
+import '../../services/auth_service.dart';
+import '../../services/theme_service.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -9,53 +11,124 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  final TextEditingController _nameController = TextEditingController(text: "Ahmad");
-  final TextEditingController _emailController = TextEditingController(text: "ahmad@example.com");
+  final AuthService _authService = AuthService();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  bool _isLoading = false;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final doc = await _authService.getUserData();
+    if (doc != null && doc.exists) {
+      final data = doc.data() as Map<String, dynamic>;
+      setState(() {
+        _nameController.text = data['fullName'] ?? "";
+        _emailController.text = data['email'] ?? _authService.currentUser?.email ?? "";
+        _isInitialized = true;
+      });
+    }
+  }
+
+  Future<void> _saveChanges() async {
+    if (_nameController.text.trim().isEmpty || _emailController.text.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fill in all fields")),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _authService.updateProfile(
+        fullName: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+      );
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Profile updated successfully")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: ${e.toString()}")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = ThemeService().isDarkMode;
+
     return Scaffold(
       body: Stack(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              gradient: AppColors.mainBackground,
+            decoration: BoxDecoration(
+              gradient: isDark 
+                ? AppColors.mainBackground 
+                : LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.purple.shade50, Colors.white, Colors.blue.shade50],
+                  ),
             ),
           ),
           SafeArea(
             child: Column(
               children: [
-                _buildAppBar(context),
+                _buildAppBar(context, isDark),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 20),
-                        const Text(
-                          "Edit Profile",
-                          style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold),
+                  child: !_isInitialized 
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.accentLavender))
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 20),
+                            Text(
+                              "Edit Profile",
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87, 
+                                fontSize: 36, 
+                                fontWeight: FontWeight.bold
+                              ),
+                            ),
+                            Text(
+                              "Refine your personal sanctuary details.",
+                              style: TextStyle(
+                                color: isDark ? Colors.white54 : Colors.black54, 
+                                fontSize: 18
+                              ),
+                            ),
+                            const SizedBox(height: 40),
+
+                            _buildAvatarSection(),
+                            const SizedBox(height: 40),
+
+                            _buildTextField("Full Name", _nameController, Icons.person_outline, isDark),
+                            const SizedBox(height: 24),
+
+                            _buildTextField("Email Address", _emailController, Icons.email_outlined, isDark),
+                            const SizedBox(height: 40),
+
+                            _buildSaveButton(context),
+                            const SizedBox(height: 20),
+                          ],
                         ),
-                        const Text(
-                          "Refine your personal sanctuary details.",
-                          style: TextStyle(color: Colors.white54, fontSize: 18),
-                        ),
-                        const SizedBox(height: 40),
-
-                        _buildAvatarSection(),
-                        const SizedBox(height: 40),
-
-                        _buildTextField("Full Name", _nameController, Icons.person_outline),
-                        const SizedBox(height: 24),
-
-                        _buildTextField("Email Address", _emailController, Icons.email_outlined),
-                        const SizedBox(height: 40),
-
-                        _buildSaveButton(context),
-                      ],
-                    ),
-                  ),
+                      ),
                 ),
               ],
             ),
@@ -65,21 +138,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  Widget _buildAppBar(BuildContext context) {
+  Widget _buildAppBar(BuildContext context, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white70, size: 20),
+            icon: Icon(Icons.arrow_back_ios_new, color: isDark ? Colors.white70 : Colors.black87, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
-          const Text(
+          Text(
             "Sanctuary",
-            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(width: 40), // Balance the back button
+          const SizedBox(width: 40),
         ],
       ),
     );
@@ -89,11 +162,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return Center(
       child: Stack(
         children: [
-          const Hero(
-            tag: 'profile-pic',
-            child: CircleAvatar(
-              radius: 60,
-              backgroundImage: NetworkImage("https://i.pravatar.cc/150?img=3"),
+          CircleAvatar(
+            radius: 60,
+            backgroundColor: AppColors.accentLavender.withAlpha(51), // 0.2 * 255 = 51
+            child: Text(
+              _nameController.text.isNotEmpty ? _nameController.text[0].toUpperCase() : "U",
+              style: const TextStyle(color: AppColors.accentLavender, fontSize: 48, fontWeight: FontWeight.bold),
             ),
           ),
           Positioned(
@@ -113,19 +187,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController controller, IconData icon) {
+  Widget _buildTextField(String label, TextEditingController controller, IconData icon, bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+        Text(label, style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 14)),
         const SizedBox(height: 10),
         TextField(
           controller: controller,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.white54, size: 20),
+            prefixIcon: Icon(icon, color: isDark ? Colors.white54 : Colors.black54, size: 20),
             filled: true,
-            fillColor: Colors.black.withValues(alpha: 0.4),
+            fillColor: isDark ? Colors.white.withAlpha(13) : Colors.black.withAlpha(13), // 0.05 * 255 = 12.75 -> 13
             contentPadding: const EdgeInsets.symmetric(vertical: 18),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
           ),
@@ -142,26 +216,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         gradient: AppColors.primaryButtonGradient,
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
-          BoxShadow(color: AppColors.accentLavender.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10))
+          BoxShadow(color: AppColors.accentLavender.withAlpha(77), blurRadius: 20, offset: const Offset(0, 10)) // 0.3 * 255 = 76.5 -> 77
         ],
       ),
       child: ElevatedButton(
-        onPressed: () {
-          // Logic to save changes
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Profile updated successfully")),
-          );
-        },
+        onPressed: _isLoading ? null : _saveChanges,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         ),
-        child: const Text(
-          "Save Changes",
-          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-        ),
+        child: _isLoading 
+          ? const CircularProgressIndicator(color: Colors.white)
+          : const Text(
+              "Save Changes",
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
       ),
     );
   }

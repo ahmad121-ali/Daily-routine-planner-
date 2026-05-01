@@ -1,6 +1,9 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../theme/linear_gradient.dart';
+import '../../models/ritual.dart';
+import '../../services/ritual_service.dart';
+import '../../widgets/timer_dialog.dart';
 
 class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
@@ -10,18 +13,88 @@ class TaskListScreen extends StatefulWidget {
 }
 
 class _TaskListScreenState extends State<TaskListScreen> {
+  final RitualService _ritualService = RitualService();
   String selectedFilter = "All";
-  final List<String> filters = ["All", "Flow", "Deep", "Soft"];
+  String searchQuery = "";
+  
+  final List<String> filters = ["All", "Dawn", "Zenith", "Dusk"];
+
+  @override
+  void initState() {
+    super.initState();
+    _ritualService.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    _ritualService.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  List<Ritual> get filteredRituals {
+    return _ritualService.allRituals.where((r) {
+      final matchesFilter = selectedFilter == "All" || 
+                           r.period.name.toLowerCase() == selectedFilter.toLowerCase();
+      final matchesSearch = r.title.toLowerCase().contains(searchQuery.toLowerCase()) || 
+                           r.subtitle.toLowerCase().contains(searchQuery.toLowerCase());
+      return matchesFilter && matchesSearch;
+    }).toList();
+  }
+
+  void _handleRitualTap(Ritual ritual) {
+    if (ritual.isTimed && !ritual.isCompleted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => TimerDialog(
+          ritual: ritual, 
+          onComplete: () => _ritualService.toggleStatus(ritual.id),
+        ),
+      );
+    } else if (!ritual.isCounter) {
+      _ritualService.toggleStatus(ritual.id);
+    }
+  }
+
+  void _showDeleteDialog(Ritual ritual) {
+    showDialog(
+      context: context,
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1A1F36),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+          title: const Text("Delete Ritual?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text("Are you sure you want to remove '${ritual.title}' from your sanctuary?", style: const TextStyle(color: Colors.white70)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel", style: TextStyle(color: Colors.white38)),
+            ),
+            TextButton(
+              onPressed: () {
+                _ritualService.deleteRitual(ritual.id);
+                Navigator.pop(context);
+              },
+              child: const Text("Delete", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent, // To show background below bottom sheet
       body: Stack(
         children: [
-          // 1. Background Gradient
           Container(decoration: const BoxDecoration(gradient: AppColors.mainBackground)),
-          
-          // 2. Main Content
           SafeArea(
             child: Column(
               children: [
@@ -39,12 +112,10 @@ class _TaskListScreenState extends State<TaskListScreen> {
                       _buildFilterChips(),
                       const SizedBox(height: 30),
                       
-                      // Ritual Items (Backend will map these later)
-                      _ritualItem("Vedic Meditation", "06:30 AM", "Flow", Icons.self_improvement, AppColors.accentLavender),
-                      _ritualItem("Deep Focus Work", "09:00 AM", "Deep", Icons.computer, AppColors.accentPurple),
-                      _ritualItem("Power Nap", "02:00 PM", "Soft", Icons.hotel, Colors.blueAccent),
-                      _ritualItem("Evening Yoga", "07:30 PM", "Soft", Icons.self_improvement, AppColors.accentPink),
-                      _ritualItem("Gratitude Journal", "10:00 PM", "Flow", Icons.edit_note, Colors.tealAccent),
+                      if (filteredRituals.isEmpty)
+                        _buildEmptyState()
+                      else
+                        ...filteredRituals.map((ritual) => _ritualItem(ritual)),
                       
                       const SizedBox(height: 100),
                     ],
@@ -53,6 +124,20 @@ class _TaskListScreenState extends State<TaskListScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return const Center(
+      child: Column(
+        children: [
+          SizedBox(height: 40),
+          Icon(Icons.search_off_rounded, color: Colors.white12, size: 80),
+          SizedBox(height: 16),
+          Text("No rituals found", style: TextStyle(color: Colors.white38, fontSize: 16, fontWeight: FontWeight.bold)),
+          Text("Try a different period or search.", style: TextStyle(color: Colors.white24, fontSize: 13)),
         ],
       ),
     );
@@ -87,13 +172,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
+            color: Colors.white.withAlpha(13),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            border: Border.all(color: Colors.white.withAlpha(26)),
           ),
-          child: const TextField(
-            style: TextStyle(color: Colors.white),
-            decoration: InputDecoration(
+          child: TextField(
+            onChanged: (value) => setState(() => searchQuery = value),
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
               hintText: "Search your rituals...",
               hintStyle: TextStyle(color: Colors.white24, fontSize: 15),
               prefixIcon: Icon(Icons.search, color: Colors.white38, size: 22),
@@ -121,19 +207,20 @@ class _TaskListScreenState extends State<TaskListScreen> {
               duration: const Duration(milliseconds: 250),
               padding: const EdgeInsets.symmetric(horizontal: 20),
               decoration: BoxDecoration(
-                color: isSelected ? AppColors.accentLavender : Colors.white.withValues(alpha: 0.05),
+                color: isSelected ? AppColors.accentLavender : Colors.white.withAlpha(13),
                 borderRadius: BorderRadius.circular(15),
                 border: Border.all(
-                  color: isSelected ? Colors.transparent : Colors.white.withValues(alpha: 0.1),
+                  color: isSelected ? Colors.transparent : Colors.white.withAlpha(26),
                 ),
               ),
               child: Center(
                 child: Text(
-                  filters[index],
+                  filters[index].toUpperCase(),
                   style: TextStyle(
                     color: isSelected ? Colors.black87 : Colors.white70,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 13,
+                    fontSize: 11,
+                    letterSpacing: 1.0,
                   ),
                 ),
               ),
@@ -153,51 +240,25 @@ class _TaskListScreenState extends State<TaskListScreen> {
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white70, size: 20),
+                icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 24),
                 onPressed: () => Navigator.pop(context),
               ),
               const Hero(
-                tag: 'profile-pic',
+                tag: 'profile-pic-list',
                 child: CircleAvatar(radius: 18, backgroundImage: NetworkImage("https://i.pravatar.cc/150?img=3")),
               ),
               const SizedBox(width: 12),
               const Text("Sanctuary", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
             ],
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.settings, color: Colors.white70),
-            offset: const Offset(0, 50),
-            color: const Color(0xFF1A1F36),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            onSelected: (value) {
-              if (value == 'logout') Navigator.pushReplacementNamed(context, '/');
-            },
-            itemBuilder: (context) => [
-              _buildPopupItem("edit", "Edit", Icons.edit),
-              _buildPopupItem("settings", "Settings", Icons.settings_suggest),
-              const PopupMenuDivider(height: 1),
-              _buildPopupItem("logout", "Logout", Icons.logout, isDestructive: true),
-            ],
-          )
+          const Icon(Icons.auto_awesome, color: AppColors.accentLavender, size: 20),
         ],
       ),
     );
   }
 
-  PopupMenuItem<String> _buildPopupItem(String value, String text, IconData icon, {bool isDestructive = false}) {
-    return PopupMenuItem(
-      value: value,
-      child: Row(
-        children: [
-          Icon(icon, color: isDestructive ? Colors.redAccent : Colors.white70, size: 20),
-          const SizedBox(width: 10),
-          Text(text, style: TextStyle(color: isDestructive ? Colors.redAccent : Colors.white)),
-        ],
-      ),
-    );
-  }
-
-  Widget _ritualItem(String title, String time, String focus, IconData icon, Color color) {
+  Widget _ritualItem(Ritual ritual) {
+    final color = ritual.color;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: ClipRRect(
@@ -205,54 +266,60 @@ class _TaskListScreenState extends State<TaskListScreen> {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Material(
-            color: Colors.white.withValues(alpha: 0.03),
+            color: Colors.white.withAlpha(8),
             child: InkWell(
-              onTap: () {}, // For backend details
+              onTap: () => _handleRitualTap(ritual),
+              onLongPress: () => _showDeleteDialog(ritual),
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  border: Border.all(color: Colors.white.withAlpha(20)),
                 ),
                 child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
+                        color: ritual.isCompleted ? AppColors.accentLavender.withAlpha(26) : color.withAlpha(26),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(icon, color: color, size: 22),
+                      child: Icon(
+                        ritual.isCompleted ? Icons.check : (ritual.isTimed ? Icons.timer_outlined : ritual.icon), 
+                        color: ritual.isCompleted ? AppColors.accentLavender : color, 
+                        size: 22
+                      ),
                     ),
                     const SizedBox(width: 18),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(title, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                          Text(
+                            ritual.title, 
+                            style: TextStyle(
+                              color: Colors.white, 
+                              fontSize: 17, 
+                              fontWeight: FontWeight.w700,
+                              decoration: ritual.isCompleted ? TextDecoration.lineThrough : null,
+                            )
+                          ),
                           const SizedBox(height: 4),
-                          Text(time, style: const TextStyle(color: Colors.white38, fontSize: 13, fontWeight: FontWeight.w500)),
+                          Text(
+                            "${ritual.time} • ${ritual.period.name.toUpperCase()}", 
+                            style: const TextStyle(color: Colors.white38, fontSize: 13, fontWeight: FontWeight.w500)
+                          ),
                         ],
                       ),
                     ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            focus.toUpperCase(), 
-                            style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.8),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Icon(Icons.arrow_forward_ios, color: Colors.white12, size: 12),
-                      ],
-                    ),
+                    if (ritual.isCounter)
+                      _buildCounterUI(ritual)
+                    else
+                      const Icon(
+                        Icons.more_vert, 
+                        color: Colors.white12, 
+                        size: 18
+                      ),
                   ],
                 ),
               ),
@@ -260,6 +327,26 @@ class _TaskListScreenState extends State<TaskListScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCounterUI(Ritual ritual) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          onPressed: () => _ritualService.decrementCounter(ritual.id),
+          icon: const Icon(Icons.remove_circle_outline, color: Colors.white24, size: 20),
+        ),
+        Text(
+          "${ritual.currentCount}/${ritual.goalCount}", 
+          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 14)
+        ),
+        IconButton(
+          onPressed: () => _ritualService.incrementCounter(ritual.id),
+          icon: Icon(Icons.add_circle_outline, color: AppColors.accentLavender.withAlpha(179), size: 20),
+        ),
+      ],
     );
   }
 }
